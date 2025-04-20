@@ -124,13 +124,36 @@ def find_next_lesson(now, group_schedule):
 
 
 
-# --- Функция для получения группы пользователя (замените на вашу реализацию) ---
-def get_user_group(user_id):
-    # Здесь должна быть ваша логика определения группы пользователя,
-    # например, поиск в базе данных или чтение из файла.
-    # Пока что вернем "group1" для примера:
-    return "group1"
+# --- Работа с пользователями и группами (JSON) ---
+USERS_FILE = 'users.json'
 
+try:
+    with open(USERS_FILE, 'r', encoding='utf-8') as f:
+        users = json.load(f)
+except FileNotFoundError:
+    users = {}
+
+def save_users():
+    with open(USERS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(users, f, indent=4, ensure_ascii=False)
+
+def get_user_group(user_id):
+    user_id = str(user_id) # Преобразуем user_id в строку
+    if user_id in users:
+        return users[user_id]
+    else:
+        return None # Возвращаем None, если пользователь не найден
+
+@bot.message_handler(commands=['setgroup'])
+def set_group_command(message):
+    if len(message.text.split()) > 1:
+        group_name = message.text.split(maxsplit=1)[1]
+        user_id = str(message.chat.id) # Преобразуем user_id в строку
+        users[user_id] = group_name
+        save_users()
+        bot.reply_to(message, f"Ваша группа установлена: {group_name}")
+    else:
+        bot.reply_to(message, "Пожалуйста, укажите название группы: /setgroup <название_группы>")
 
 
 # ... (остальной код админ-панели)
@@ -175,6 +198,28 @@ def admin_only(func): # Декоратор для функций, доступн
             bot.reply_to(message, "Эта команда доступна только администратору.")
     return wrapper
 
+@bot.message_handler(func=lambda message: message.chat.id == ADMIN_ID and message.text == "Добавить занятие ➕")
+@admin_only
+def add_lesson(message):
+    bot.send_message(message.chat.id, "Введите информацию о занятии в формате:\n<группа> <день_недели> <название> <время>\nНапример:\n group1 monday Математика 10:00-11:00")
+    bot.register_next_step_handler(message, process_add_lesson)
+
+def process_add_lesson(message):
+    try:
+        group, day, name, time = message.text.split(maxsplit=3)
+        day = day.lower() # Приводим день недели к нижнему регистру
+
+        if group not in schedule:
+            schedule[group] = {}
+
+        if day not in schedule[group]:
+            schedule[group][day] = []
+
+        schedule[group][day].append(f"{name} {time}")
+        save_schedule()
+        bot.send_message(message.chat.id, "Занятие добавлено!")
+    except ValueError:
+        bot.send_message(message.chat.id, "Неверный формат. Попробуйте еще раз.")
 
 @bot.message_handler(commands=['admin'])
 @admin_only
