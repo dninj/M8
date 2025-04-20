@@ -1,37 +1,23 @@
 import telebot
 from telebot import types
 import datetime
-import json # Для работы с JSON
+import json
 
 # Замените 'YOUR_BOT_TOKEN' на токен вашего бота
-bot = telebot.TeleBot('YOUR_BOT_TOKEN')
+bot = telebot.TeleBot('your bot token')
 
 # --- Работа с расписанием (JSON) ---
+SCHEDULE_FILE = 'schedule.json' # Имя файла для хранения расписания
 
 try:
-    with open('schedule.json', 'r', encoding='utf-8') as f:
+    with open(SCHEDULE_FILE, 'r', encoding='utf-8') as f:
         schedule = json.load(f)
 except FileNotFoundError:
-    schedule = {} # Создаем пустой словарь, если файл не найден
-
+    schedule = {}
 
 def save_schedule():
-    with open('schedule.json', 'w', encoding='utf-8') as f:
+    with open(SCHEDULE_FILE, 'w', encoding='utf-8') as f:
         json.dump(schedule, f, indent=4, ensure_ascii=False)
-
-
-# Пример структуры данных в JSON (schedule.json):
-# {
-#     "group1": {
-#         "monday": ["Математика 10:00-11:00", "Физика 11:15-12:15"],
-#         "tuesday": ["Химия 9:00-10:00", "Биология 10:15-11:15"],
-#         # ...
-#     },
-#     "group2": {
-#         # ... расписание для другой группы
-#     }
-# }
-
 
 
 # --- Обработчики команд и кнопок ---
@@ -41,114 +27,177 @@ def start(message):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     item1 = types.KeyboardButton("Расписание на сегодня 📚")
     item2 = types.KeyboardButton("Расписание на неделю 📅")
-    # Добавьте другие кнопки по необходимости
-    markup.add(item1, item2)
+    item3 = types.KeyboardButton("Мой следующий урок ➡️") # Добавлена кнопка
+    markup.add(item1, item2, item3) # Добавлена кнопка в разметку
 
     bot.send_message(message.chat.id, 'Привет! Что хочешь узнать?', reply_markup=markup)
 
 
-
 @bot.message_handler(regexp="Расписание на сегодня 📚")
 def today_schedule(message):
-    # 1. Получаем текущий день недели
-    today = datetime.datetime.now().strftime("%A").lower() # например, "monday"
+    today = datetime.datetime.now().strftime("%A").lower()
+    group = get_user_group(message.chat.id) # !!! Получение группы пользователя
+    if not group:
+        bot.send_message(message.chat.id, "Ваша группа не установлена. Обратитесь к администратору.")
+        return
 
-    # 2 & 3. Получаем расписание из JSON (предполагаем, что пользователь принадлежит к "group1")
-    group_schedule = schedule.get("group1", {}) # Здесь нужно определить группу пользователя!
-    today_lessons = group_schedule.get(today, [])
-
-    # 4. Формируем сообщение
-    if today_lessons:
-        schedule_text = f"Расписание на сегодня ({today.capitalize()}):\n"
-        for lesson in today_lessons:
-            schedule_text += f"- {lesson}\n"
-    else:
-        schedule_text = "На сегодня занятий нет."
-
-    # 5. Отправляем сообщение
+    today_lessons = schedule.get(group, {}).get(today, [])
+    schedule_text = create_schedule_message(today.capitalize(), today_lessons)
     bot.send_message(message.chat.id, schedule_text)
 
 
-# Аналогично реализуйте обработчик для "Расписание на неделю"
+def create_schedule_message(day_name, lessons):
+    if lessons:
+        schedule_text = f"Расписание на {day_name}:\n"
+        for lesson in lessons:
+            schedule_text += f"- {lesson}\n"
+    else:
+        schedule_text = f"На {day_name} занятий нет."
+    return schedule_text
+
+
+@bot.message_handler(regexp="Расписание на неделю 📅")
+def week_schedule(message):
+    group = get_user_group(message.chat.id) # !!! Получение группы пользователя
+    if not group:
+        bot.send_message(message.chat.id, "Ваша группа не установлена. Обратитесь к администратору.")
+        return
+
+    group_schedule = schedule.get(group, {})
+    week_text = ""
+    for day, lessons in group_schedule.items():
+        week_text += create_schedule_message(day.capitalize(), lessons) + "\n\n"
+
+    bot.send_message(message.chat.id, week_text or "Расписание на неделю пустое.")
+
+
+
 @bot.message_handler(regexp="Мой следующий урок ➡️")
 def next_lesson(message):
-    # 1. Определяем текущее время
     now = datetime.datetime.now()
-    # 2. Определяем группу пользователя (замените на ваш способ)
-    group = "group1" # !!! ЗАМЕНИТЕ НА РЕАЛЬНЫЙ СПОСОБ ОПРЕДЕЛЕНИЯ ГРУППЫ !!!
-    # 3. Получаем расписание группы
+    group = get_user_group(message.chat.id) # !!! Получение группы пользователя
+    if not group:
+        bot.send_message(message.chat.id, "Ваша группа не установлена. Обратитесь к администратору.")
+        return
+
+
     group_schedule = schedule.get(group, {})
-
-    next_lesson_info = None
-    for day, lessons in group_schedule.items():
-        # Определяем день недели относительно текущего дня
-        day_offset = (list(group_schedule.keys()).index(day) - list(group_schedule.keys()).index(now.strftime("%A").lower())) % 7
-
-
-        for lesson_str in lessons:
-            lesson_time_str = lesson_str.split()[-1] # Выделяем время из строки
-            try:
-                lesson_time = datetime.datetime.strptime(lesson_time_str, "%H:%M-%H:%M").time()
-                lesson_datetime = datetime.datetime.combine(now.date() + datetime.timedelta(days=day_offset), lesson_time)
-
-
-                if lesson_datetime > now and (next_lesson_info is None or lesson_datetime < next_lesson_info["time"]):
-                    next_lesson_info = {
-                        "time": lesson_datetime,
-                        "lesson": lesson_str
-                    }
-
-            except ValueError:
-                bot.send_message(message.chat.id, "Ошибка в формате времени в расписании.")
-                return
-
+    next_lesson_info = find_next_lesson(now, group_schedule)
 
     if next_lesson_info:
         bot.send_message(message.chat.id, f"Твой следующий урок:\n{next_lesson_info['lesson']} в {next_lesson_info['time'].strftime('%A %H:%M')}")
     else:
         bot.send_message(message.chat.id, "Ближайших уроков не найдено.")
 
-# --- Админ-панель (упрощенная) ---
-admin_id = 123456789 # !!! ЗАМЕНИТЕ НА ID АДМИНИСТРАТОРА !!!
 
-@bot.message_handler(commands=['add_lesson'])
-def add_lesson(message):
-    if message.from_user.id == admin_id:
-        # Логика добавления урока (группа, день, время, название)
-        # ... (реализация добавления урока в schedule)
-        save_schedule()
-        bot.reply_to(message, "Урок добавлен.")
+def find_next_lesson(now, group_schedule):
+    next_lesson_info = None
 
-@bot.message_handler(commands=['remove_lesson'])
-def remove_lesson(message):
-    if message.from_user.id == admin_id:
-        # Логика удаления урока
-        # ... (реализация удаления урока из schedule)
-        save_schedule()
-        bot.reply_to(message, "Урок удален.")
-
-
-
-# --- Все расписание с фильтрацией ---
-
-@bot.message_handler(regexp="Все расписание 🎓")
-def all_schedule(message):
-    markup = types.InlineKeyboardMarkup()
-    for group in schedule:
-        markup.add(types.InlineKeyboardButton(text=group, callback_data=f"group:{group}"))
-    bot.send_message(message.chat.id, "Выберите группу:", reply_markup=markup)
-
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("group:"))
-def show_group_schedule(call):
-    group = call.data.split(":")[1]
-    group_schedule = schedule.get(group, {})
-    schedule_text = f"Расписание для группы {group}:\n"
     for day, lessons in group_schedule.items():
-        schedule_text += f"\n{day.capitalize()}:\n"
-        for lesson in lessons:
-            schedule_text += f"- {lesson}\n"
-    bot.send_message(call.message.chat.id, schedule_text)
+        try:
+            day_offset = (list(group_schedule).index(day) - list(group_schedule).index(now.strftime("%A").lower())) % 7
 
+            for lesson_str in lessons:
+
+                try:
+                    lesson_time_str = lesson_str.split()[-1]
+                    lesson_time = datetime.datetime.strptime(lesson_time_str, "%H:%M-%H:%M").time()
+                    lesson_datetime = datetime.datetime.combine(now.date() + datetime.timedelta(days=day_offset), lesson_time)
+
+
+                    if lesson_datetime > now and (next_lesson_info is None or lesson_datetime < next_lesson_info["time"]):
+                        next_lesson_info = {
+                            "time": lesson_datetime,
+                            "lesson": lesson_str
+                        }
+                except ValueError:
+                    # Обработка некорректного формата времени, например, запись "праздник"
+                    pass # Или можно вывести предупреждение, если нужно
+
+
+        except ValueError: # Обрабатываем случай, если день недели не найден
+            pass # Игнорируем, если день не указан в расписании
+
+
+    return next_lesson_info
+
+
+
+
+# --- Функция для получения группы пользователя (замените на вашу реализацию) ---
+def get_user_group(user_id):
+    # Здесь должна быть ваша логика определения группы пользователя,
+    # например, поиск в базе данных или чтение из файла.
+    # Пока что вернем "group1" для примера:
+    return "group1"
+
+
+
+# ... (остальной код админ-панели)
+USERS_FILE = 'users.json'
+
+try:
+    with open(USERS_FILE, 'r', encoding='utf-8') as f:
+        users = json.load(f)
+except FileNotFoundError:
+    users = {}
+
+def save_users():
+    with open(USERS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(users, f, indent=4, ensure_ascii=False)
+
+def get_user_group(user_id):
+    return users.get(str(user_id)) # user_id храним как строку
+
+
+@bot.message_handler(commands=['setgroup'])
+def set_group(message):
+    # Проверяем, есть ли аргумент команды (название группы)
+    if len(message.text.split()) > 1:
+        group = message.text.split(maxsplit=1)[1]
+        users[str(message.chat.id)] = group
+        save_users()
+        bot.reply_to(message, f"Ваша группа установлена на: {group}")
+    else:
+        bot.reply_to(message, "Пожалуйста, укажите название группы: /setgroup <название_группы>")
+
+
+
+
+# --- Админ-панель ---
+ADMIN_ID = 123456789 # !!! ЗАМЕНИТЕ НА ВАШ ID !!!
+
+def admin_only(func): # Декоратор для функций, доступных только администратору
+    def wrapper(message):
+        if message.chat.id == ADMIN_ID:
+            return func(message)
+        else:
+            bot.reply_to(message, "Эта команда доступна только администратору.")
+    return wrapper
+
+
+@bot.message_handler(commands=['admin'])
+@admin_only
+def admin_panel(message):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add("Добавить занятие ➕", "Изменить занятие 🔄", "Удалить занятие ➖")
+    bot.send_message(message.chat.id, "Админ-панель:", reply_markup=markup)
+
+
+# ... (реализация команд добавления, изменения и удаления занятий)
+
+
+# --- Обработка ошибок ---
+@bot.message_handler(func=lambda message: True)
+def echo_all(message):
+    # ... (обработка неизвестных команд и сообщений)
+
+
+# --- Запуск бота ---
+    if __name__ == '__main__':
+        try:
+         bot.polling(none_stop=True)
+        except Exception as e:
+            print(f"Ошибка бота: {e}")
 
 bot.polling(none_stop=True)
