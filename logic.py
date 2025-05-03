@@ -4,7 +4,7 @@ import datetime
 import json
 
 # Замените 'YOUR_BOT_TOKEN' на токен вашего бота
-bot = telebot.TeleBot('7948135387:AAHj9C3qCjNYl9UN_2OHj7NHj4SqKqTFQu4')
+bot = telebot.TeleBot('')
 
 # --- Работа с расписанием (JSON) ---
 SCHEDULE_FILE = 'schedule.json' # Имя файла для хранения расписания
