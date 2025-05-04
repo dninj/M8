@@ -32,7 +32,37 @@ def start(message):
 
     bot.send_message(message.chat.id, 'Привет! Что хочешь узнать?', reply_markup=markup)
 
+@bot.message_handler(commands=['setgroup'])
+def set_group(message):
+    if len(message.text.split()) > 1:
+        group = message.text.split(maxsplit=1)[1]
+        if group in schedule: # Проверка существования группы
+            users[str(message.chat.id)] = group
+            save_users()
+            bot.reply_to(message, f"Ваша группа установлена на: {group}")
+        else:
+            bot.reply_to(message, f"Группа '{group}' не найдена. Доступные группы: {', '.join(schedule.keys())}")
+    else:
+        available_groups = ', '.join(schedule.keys()) or "нет доступных групп."
+        bot.reply_to(message, f"Пожалуйста, укажите название группы: /setgroup <название_группы>\nДоступные группы: {available_groups}")
 
+
+# --- Админ-команды для управления группами (пример) ---
+@bot.message_handler(commands=['addgroup']) # Добавление группы
+def add_group(message):
+    if len(message.text.split()) > 1:
+        group_name = message.text.split(maxsplit=1)[1]
+        if group_name not in schedule:
+            schedule[group_name] = {} # Создаем пустое расписание для новой группы
+            save_schedule()
+            bot.reply_to(message, f"Группа '{group_name}' создана.")
+        else:
+            bot.reply_to(message, f"Группа '{group_name}' уже существует.")
+    else:
+
+
+
+        bot.reply_to(message, "Пожалуйста, укажите название группы: /addgroup <название_группы>")
 @bot.message_handler(regexp="Расписание на сегодня 📚")
 def today_schedule(message):
     today = datetime.datetime.now().strftime("%A").lower()
